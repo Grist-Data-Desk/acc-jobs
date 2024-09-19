@@ -4,7 +4,7 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from bs4 import BeautifulSoup
 import pandas as pd
 import time
@@ -46,8 +46,7 @@ def scrape_page(driver, url):
         apply_by = card.find('span', string='Apply by').find_next('p').text.strip() if card.find('span', string='Apply by') else "N/A"
         learn_more_url = card.find('a', class_='usa-button')['href'] if card.find('a', class_='usa-button') else "N/A"
         
-        # Scrape additional details from the "Learn more and apply" page
-        focus_areas, work_environments = scrape_details(driver, f"https://www.acc.gov{learn_more_url}")
+        focus_areas, work_environments, apply_url = scrape_details(driver, f"https://www.acc.gov{learn_more_url}")
         
         data.append({
             'Title': title,
@@ -58,7 +57,8 @@ def scrape_page(driver, url):
             'Apply By': apply_by,
             'Learn More URL': f"https://www.acc.gov{learn_more_url}" if learn_more_url != "N/A" else "N/A",
             'Focus Areas': focus_areas,
-            'Work Environments': work_environments
+            'Work Environments': work_environments,
+            'Apply URL': apply_url
         })
     
     return data
@@ -73,7 +73,7 @@ def scrape_details(driver, url):
         )
     except TimeoutException:
         print(f"Timed out waiting for details page to load: {url}")
-        return "N/A", "N/A"
+        return "N/A", "N/A", "N/A"
 
     soup = BeautifulSoup(driver.page_source, 'html.parser')
     
@@ -83,7 +83,14 @@ def scrape_details(driver, url):
     work_environments = soup.find('h3', string='Work environment').find_next('ul').find_all('li') if soup.find('h3', string='Work environment') else []
     work_environments = [env.text.strip() for env in work_environments]
     
-    return ', '.join(focus_areas), ', '.join(work_environments)
+    apply_url = "N/A"
+    try:
+        apply_button = driver.find_element(By.CSS_SELECTOR, "a.usa-button.btn.btn--ext-link")
+        apply_url = apply_button.get_attribute('href')
+    except NoSuchElementException:
+        print(f"Apply button not found on page: {url}")
+    
+    return ', '.join(focus_areas), ', '.join(work_environments), apply_url
 
 def get_total_pages(driver, url):
     driver.get(url)
@@ -128,7 +135,7 @@ def main():
         for page in tqdm(range(1, total_pages + 1), desc="Scraping pages", unit="page"):
             url = f"{base_url}?page={page}"
             all_data.extend(scrape_page(driver, url))
-            time.sleep(1)  # Be polite to the server
+            time.sleep(1)  
         
         print("\nGeocoding locations...")
         for item in tqdm(all_data, desc="Geocoding", unit="location"):
